@@ -1,0 +1,12 @@
+version: '2'
+services:
+
+  pg:
+    image: debezium/postgres:11-alpine
+    network_mode: "host"
+    environment: 
+      POSTGRES_PASSWORD: "pw"
+  adminer:
+    image: adminer
+    restart: always
+    network_mode: "host"
