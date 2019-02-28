@@ -5,9 +5,7 @@ package sg.pg
 
 import org.postgresql.PGConnection
 import org.postgresql.PGProperty
-import org.postgresql.core.BaseConnection
-import org.postgresql.core.ServerVersion
-import org.postgresql.replication.LogSequenceNumber
+import org.postgresql.util.PSQLException
 import java.nio.ByteBuffer
 import java.sql.Connection
 import java.sql.DriverManager
@@ -33,26 +31,27 @@ class App {
     lateinit var connection: Connection
     lateinit var replicationConnection: Connection
 
-    private val currentLSN: LogSequenceNumber
-        @Throws(SQLException::class)
-        get() {
-            connection.createStatement().use({ st ->
-                st.executeQuery("select " + if ((connection as BaseConnection).haveMinimumServerVersion(ServerVersion.v10))
-                    "pg_current_wal_lsn()"
-                else
-                    "pg_current_xlog_location()").use({ rs ->
+//    private val currentLSN: LogSequenceNumber
+//        @Throws(SQLException::class)
+//        get() {
+//            connection.createStatement().use({ st ->
+//                st.executeQuery("select " + if ((connection as BaseConnection).haveMinimumServerVersion(ServerVersion.v10))
+//                    "pg_current_wal_lsn()"
+//                else
+//                    "pg_current_xlog_location()").use({ rs ->
+//
+//                    if (rs.next()) {
+//                        val lsn = rs.getString(1)
+//                        return LogSequenceNumber.valueOf(lsn)
+//                    } else {
+//                        return LogSequenceNumber.INVALID_LSN
+//                    }
+//                })
+//            })
+//        }
 
-                    if (rs.next()) {
-                        val lsn = rs.getString(1)
-                        return LogSequenceNumber.valueOf(lsn)
-                    } else {
-                        return LogSequenceNumber.INVALID_LSN
-                    }
-                })
-            })
-        }
-    private val isServerCompatible: Boolean
-        get() = (connection as BaseConnection).haveMinimumServerVersion(ServerVersion.v9_5)
+//    private val isServerCompatible: Boolean
+//        get() = (connection as BaseConnection).haveMinimumServerVersion(ServerVersion.v9_5)
 
     private fun createUrl(): String {
         return "jdbc:postgresql://$HOST:$PORT/$DATABASE"
@@ -70,57 +69,57 @@ class App {
     @Throws(SQLException::class)
     fun dropPublication(publication: String) {
 
-        connection.prepareStatement("DROP PUBLICATION $publication").use({ preparedStatement -> preparedStatement.execute() })
+        connection.prepareStatement("DROP PUBLICATION $publication").use { it.execute() }
     }
 
     @Throws(SQLException::class)
     fun createPublication(publication: String) {
 
-        connection.prepareStatement("CREATE PUBLICATION $publication FOR ALL TABLES").use({ preparedStatement -> preparedStatement.execute() })
+        connection.prepareStatement("CREATE PUBLICATION $publication FOR ALL TABLES").use { it.execute() }
     }
 
 
     @Throws(InterruptedException::class, SQLException::class, TimeoutException::class)
     fun createLogicalReplicationSlot(slotName: String, outputPlugin: String) {
         //drop previous slot
-        dropReplicationSlot(connection, slotName)
+        //dropReplicationSlot(connection, slotName)
 
-        connection.prepareStatement("SELECT * FROM pg_create_logical_replication_slot(?, ?)").use({ preparedStatement ->
-            preparedStatement.setString(1, slotName)
-            preparedStatement.setString(2, outputPlugin)
-            preparedStatement.executeQuery().use({ rs ->
-                while (rs.next()) {
-                    println("Slot Name: " + rs.getString(1))
-                    println("Xlog Position: " + rs.getString(2))
+        connection.prepareStatement("SELECT * FROM pg_create_logical_replication_slot(?, ?)")
+                .use {
+                    it.setString(1, slotName)
+                    it.setString(2, outputPlugin)
+                    it.executeQuery().use { rs ->
+                        while (rs.next()) {
+                            println("Slot Name: " + rs.getString(1))
+                            println("Xlog Position: " + rs.getString(2))
+                        }
+                    }
                 }
-            })
-
-        })
     }
 
     @Throws(SQLException::class, InterruptedException::class, TimeoutException::class)
     fun dropReplicationSlot(connection: Connection, slotName: String) {
         connection.prepareStatement(
-                "select pg_terminate_backend(active_pid) from pg_replication_slots " + "where active = true and slot_name = ?").use({ preparedStatement ->
-            preparedStatement.setString(1, slotName)
-            preparedStatement.execute()
-        })
+                "select pg_terminate_backend(active_pid) from pg_replication_slots " + "where active = true and slot_name = ?").use {
+            it.setString(1, slotName)
+            it.execute()
+        }
 
         waitStopReplicationSlot(connection, slotName)
 
-        connection.prepareStatement("select pg_drop_replication_slot(slot_name) " + "from pg_replication_slots where slot_name = ?").use({ preparedStatement ->
-            preparedStatement.setString(1, slotName)
-            preparedStatement.execute()
-        })
+        connection.prepareStatement("select pg_drop_replication_slot(slot_name) " + "from pg_replication_slots where slot_name = ?").use {
+            it.setString(1, slotName)
+            it.execute()
+        }
     }
 
     @Throws(SQLException::class)
     fun isReplicationSlotActive(connection: Connection, slotName: String): Boolean {
 
-        connection.prepareStatement("select active from pg_replication_slots where slot_name = ?").use({ preparedStatement ->
-            preparedStatement.setString(1, slotName)
-            preparedStatement.executeQuery().use({ rs -> return rs.next() && rs.getBoolean(1) })
-        })
+        connection.prepareStatement("select active from pg_replication_slots where slot_name = ?").use {
+            it.setString(1, slotName)
+            it.executeQuery().use { return it.next() && it.getBoolean(1) }
+        }
     }
 
     @Throws(InterruptedException::class, TimeoutException::class, SQLException::class)
@@ -202,7 +201,7 @@ class App {
         private val SLOT_NAME = "slot"
         private val HOST = "localhost"
         private val PORT = "5432"
-        private val DATABASE = "test"
+        private val DATABASE = "postgres"
 
 
         private fun toString(buffer: ByteBuffer): String {
@@ -224,9 +223,13 @@ class App {
 //                System.exit(-1)
 //            }
             try {
-//                app.createLogicalReplicationSlot(SLOT_NAME, pluginName)
-//                            app.dropPublication("pub1");
-                //            app.createPublication("pub1");
+                try {
+                    app.createLogicalReplicationSlot(SLOT_NAME, pluginName)
+    //                            app.dropPublication("pub1");
+                    //            app.createPublication("pub1");
+                } catch (e: PSQLException) {
+                    e.printStackTrace()
+                }
                 app.openReplicationConnection()
                 app.receiveChangesOccursBeforStartReplication()
             } catch (e: InterruptedException) {
